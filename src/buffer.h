@@ -16,4 +16,4 @@ struct buff_struct
 void init_buffer(struct buff_struct* buffer, size_t size);
 void free_buffer(struct buff_struct* buffer);
 
-#endif
+#endif	/* BUFFER_H */

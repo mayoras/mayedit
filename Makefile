@@ -1,22 +1,26 @@
 #!bin/bash
-.PHONY: clean
 
-CC := gcc
-OBJDIR := obj
-OBJS := $(addprefix $(OBJDIR)/,buffer.o main.o)
-LIB := -lncurses
+CC=gcc
+SRCDIR=src
+OBJDIR=obj
+OBJS=$(addprefix $(OBJDIR)/,buffer.o main.o)
+LIB=-lncurses
+INCS=-I./
+OPT=-O0
+CFLAGS=-Wall -Wextra -g $(OPT) $(LIB) $(INCS)
 
-all: out/main
+BINARY=out/main.out
 
-out/main:	$(OBJS)
-	$(CC) $^ -o out/main
+all: $(BINARY)
 
-obj/buffer.o:	src/buffer.c
-	$(CC) -c $^ -o $@
+$(BINARY):	$(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
 
-obj/main.o: src/main.c
-	$(CC) -c $< $(LIB) -o $@
+$(OBJDIR)/%.o:$(SRCDIR)/%.c
+	$(CC) $(CFLAGS) -c -o $@ $^
 
 clean:
-	rm out/*
-	rm obj/*
+	rm $(BINARY)
+	rm $(OBJS)
+
+.PHONY= clean
