@@ -24,26 +24,5 @@ void write_line(struct buff_struct* buffer, char* line, int nchars) {
 
 int main(void) {
 
-	struct buff_struct buffer;
-	init_buffer(&buffer, INIT_SIZE_BUFF);
-
-	// If buffer is not allocated
-	if (buffer.buff == NULL) {
-		perror("Error: Could not allocate buffer\n");
-		exit(EXIT_FAILURE);
-	}
-
-	// scanf("%s", buffer);
-
-	char* line;
-	size_t nl = 32;
-	int n_chars = getline(&line, &nl, stdin);
-
-	write_line(&buffer, line, n_chars);
-
-	printf("%s\n", buffer.buff);
-
-	free_buffer(&buffer);
-
 	return 0;
 }
