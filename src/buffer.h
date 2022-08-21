@@ -6,14 +6,18 @@
 
 #define INIT_SIZE_BUFF 255
 
-struct buff_struct
+struct buff_st
 {
-	char* buff;
-	int nb;
-	int max_n;
+	char* buff;			// String buffer
+	int size;				// Number of characters
+	// int max_n;			// Max capacity (memory allocated)
+	int cursor;			// Write cursor
 };
 
-void init_buffer(struct buff_struct* buffer, size_t size);
-void free_buffer(struct buff_struct* buffer);
+void init_buffer(struct buff_st* buffer, size_t size);
+void destroy_buffer(struct buff_st* buffer);
+
+void move_cursor_to_start(struct buff_st* buffer);
+void move_cursor_to_end(struct buff_st* buffer);
 
 #endif	/* BUFFER_H */

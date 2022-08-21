@@ -1,26 +1,14 @@
-#!bin/bash
+#!/bin/make
 
 CC=gcc
 SRCDIR=src
+OUTDIR=out
 OBJDIR=obj
-OBJS=$(addprefix $(OBJDIR)/,buffer.o main.o)
+TESTDIR=tests
 LIB=-lncurses
-INCS=-I./
+LIBCRIT=-lcriterion
 OPT=-O0
-CFLAGS=-Wall -Wextra -g $(OPT) $(LIB) $(INCS)
+CFLAGS=-Wall -Wextra -std=c99 -pedantic $(OPT)
 
-BINARY=out/main.out
-
-all: $(BINARY)
-
-$(BINARY):	$(OBJS)
+$(OUTDIR)/mayedit: $(SRCDIR)/mayedit.c
 	$(CC) $(CFLAGS) -o $@ $^
-
-$(OBJDIR)/%.o:$(SRCDIR)/%.c
-	$(CC) $(CFLAGS) -c -o $@ $^
-
-clean:
-	rm $(BINARY)
-	rm $(OBJS)
-
-.PHONY= clean
