@@ -10,14 +10,23 @@
 #include <string.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define ESC_SEQ_SZ 3
 
 /*** data ***/
 
+enum ED_KEYS {
+    ARROW_LEFT = 1000,
+    ARROW_RIGHT,
+    ARROW_UP,
+    ARROW_DOWN
+};
+
 struct editor_config
 {
-	int screenrows;
-	int screencols;
-	struct termios orig_termios;
+    int cx, cy;	    // Cursor position
+    int screenrows;
+    int screencols;
+    struct termios orig_termios;
 };
 
 struct editor_config E;
@@ -57,15 +66,36 @@ void enable_raw_mode()
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("Error on tcsetattr");
 }
 
-char editor_read_key()
+int editor_read_key()
 {
-	char c;
-	int nchar;
-	while ((nchar=read(STDIN_FILENO, &c, 1)) != 1)
+    char c;
+    int nchar;
+    while ((nchar=read(STDIN_FILENO, &c, 1)) != 1)
+    {
+        if (nchar == -1 && errno != EAGAIN) die("Error on read");
+    }
+
+    if (c == '\x1b')
+    {
+	char seq[ESC_SEQ_SZ];
+
+	if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+	if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+	if (seq[0] == '[')
 	{
-		if (nchar == -1 && errno != EAGAIN) die("Error on read");
+	    switch(seq[1])
+	    {
+		case 'A': return ARROW_UP; break;
+		case 'B': return ARROW_DOWN; break;
+		case 'C': return ARROW_RIGHT; break;
+		case 'D': return ARROW_LEFT; break;
+		default:break;
+	    }
 	}
-	return c;
+	return '\x1b';
+    }
+    return c;
 }
 
 int get_cursor_position(int* rows, int* cols)
@@ -174,7 +204,11 @@ void editor_refresh_screen()
 
     editor_draw_rows(&ab);
 
-    ab_append(&ab, "\x1b[H", 3);
+    // Move the cursor
+    char buff[32];
+    snprintf(buff, sizeof(buff), "\x1b[%d;%dH", E.cy+1, E.cx+1);
+    ab_append(&ab, buff, strlen(buff));
+
     ab_append(&ab, "\x1b[?25h", 6);
     write(STDOUT_FILENO, ab.b, ab.len);
     ab_free(&ab);
@@ -182,18 +216,42 @@ void editor_refresh_screen()
 
 /*** input ***/
 
+void editor_move_cursor(int key) {
+    switch(key)
+    {
+	case ARROW_UP:
+	    if (E.cy > 0)
+		E.cy--;
+	    break;
+	case ARROW_LEFT:
+	    if (E.cx > 0)
+		E.cx--;
+	    break;
+	case ARROW_DOWN:
+	    if (E.cy < E.screenrows - 1)
+		E.cy++;
+	    break;
+	case ARROW_RIGHT:
+	    if (E.cx < E.screencols - 1)
+		E.cx++;
+	    break;
+	default:break;
+    }
+}
+
 void editor_process_key_pressed()
 {
-	char c = editor_read_key();
+	int c = editor_read_key();
 
 	switch (c)
 	{
-	case CTRL_KEY('q'):
+	    case CTRL_KEY('q'):
 		write(STDOUT_FILENO, "\x1b[2J", 4);
 		write(STDOUT_FILENO, "\x1b[H", 3);
 		exit(EXIT_SUCCESS);
 		break;
-	default:
+	    case ARROW_UP:case ARROW_LEFT:case ARROW_DOWN:case ARROW_RIGHT: editor_move_cursor(c); break;
+	    default:
 		break;
 	}
 }
@@ -202,8 +260,9 @@ void editor_process_key_pressed()
 
 void init_editor()
 {
-	if (get_window_size(&E.screenrows, &E.screencols) == -1)
-		die("Error on get_window_size");
+    E.cx = 0;
+    E.cy = 0;
+    if (get_window_size(&E.screenrows, &E.screencols) == -1) die("Error on get_window_size");
 }
 
 int main(void)
@@ -216,5 +275,5 @@ int main(void)
 		editor_process_key_pressed();
 	}
 
-	return EXIT_SUCCESS;
+	return 0;
 }
