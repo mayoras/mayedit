@@ -18,7 +18,12 @@ enum ED_KEYS {
     ARROW_LEFT = 1000,
     ARROW_RIGHT,
     ARROW_UP,
-    ARROW_DOWN
+    ARROW_DOWN,
+    HOME_KEY,
+    END_KEY,
+    PAGE_UP,
+    PAGE_DOWN,
+    DEL_KEY
 };
 
 struct editor_config
@@ -84,15 +89,41 @@ int editor_read_key()
 
 	if (seq[0] == '[')
 	{
-	    switch(seq[1])
+	    // <esc>[(0-9)~
+	    if (seq[1] <= 9 && seq[1] >= 0)
 	    {
-		case 'A': return ARROW_UP; break;
-		case 'B': return ARROW_DOWN; break;
-		case 'C': return ARROW_RIGHT; break;
-		case 'D': return ARROW_LEFT; break;
-		default:break;
-	    }
-	}
+		if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
+		if (seq[2] == '~')
+		    switch(seq[1])
+		    {
+			case '1': return HOME_KEY;
+			case '3': return DEL_KEY;	// TODO: Implement delete key functionality
+			case '4': return END_KEY;
+		        case '5': return PAGE_UP;
+		        case '6': return PAGE_DOWN;
+			case '7': return HOME_KEY;
+			case '8': return END_KEY;
+		        default:break;
+		    }
+	    } else	// <esc>[(A|B|C|D)
+		switch(seq[1])
+	    	{
+	    	    case 'A': return ARROW_UP;
+	    	    case 'B': return ARROW_DOWN;
+	    	    case 'C': return ARROW_RIGHT;
+	    	    case 'D': return ARROW_LEFT;
+		    case 'H': return HOME_KEY;
+		    case 'F': return END_KEY;
+	    	    default:break;
+	    	}
+	} else
+	    if (seq[0] == 'O')
+		switch (seq[1])
+		{
+		    case 'H': return HOME_KEY;
+		    case 'F': return END_KEY;
+		    default: break;
+		}
 	return '\x1b';
     }
     return c;
@@ -128,8 +159,7 @@ int get_window_size(int* rows, int* cols)
 	{
 		if (write(STDIN_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;	// Set cursor to the bottom-right corner
 		return get_cursor_position(rows, cols);					// Get cursor position
-	}
-	else
+	} else
 	{
 		*cols = ws.ws_col;
 		*rows = ws.ws_row;
@@ -183,8 +213,7 @@ void editor_draw_rows(struct abuff* ab)
 		}
 		while (padding--) ab_append(ab, " ", 1);
 		ab_append(ab, welcome, welcome_len);
-	    }
-	    else
+	    } else
 	    {
 		ab_append(ab, "~", 1);
 	    }
@@ -219,6 +248,7 @@ void editor_refresh_screen()
 void editor_move_cursor(int key) {
     switch(key)
     {
+	// Arrow keys
 	case ARROW_UP:
 	    if (E.cy > 0)
 		E.cy--;
@@ -235,6 +265,12 @@ void editor_move_cursor(int key) {
 	    if (E.cx < E.screencols - 1)
 		E.cx++;
 	    break;
+	case HOME_KEY:
+	    E.cx = 0;
+	    break;
+	case END_KEY:
+	    E.cx = E.screencols - 1;
+	    break;
 	default:break;
     }
 }
@@ -250,7 +286,22 @@ void editor_process_key_pressed()
 		write(STDOUT_FILENO, "\x1b[H", 3);
 		exit(EXIT_SUCCESS);
 		break;
-	    case ARROW_UP:case ARROW_LEFT:case ARROW_DOWN:case ARROW_RIGHT: editor_move_cursor(c); break;
+	    case ARROW_UP:
+	    case ARROW_LEFT:
+	    case ARROW_DOWN:
+	    case ARROW_RIGHT: 
+	    case HOME_KEY:
+	    case END_KEY:
+		editor_move_cursor(c); break;
+
+	    case PAGE_UP:
+	    case PAGE_DOWN:
+		{
+		    int times = E.screenrows;
+		    while (times--)
+			editor_move_cursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+		}
+		break;
 	    default:
 		break;
 	}
