@@ -1,3 +1,5 @@
+#define MAYEDIT_VERSION "0.0.1"
+
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -5,6 +7,7 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <errno.h>
+#include <string.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -94,7 +97,7 @@ int get_window_size(int* rows, int* cols)
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0)
 	{
 		if (write(STDIN_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;	// Set cursor to the bottom-right corner
-		return get_cursor_position(rows, cols);			// Get cursor position
+		return get_cursor_position(rows, cols);					// Get cursor position
 	}
 	else
 	{
@@ -105,24 +108,76 @@ int get_window_size(int* rows, int* cols)
 	}
 }
 
+/*** append buffer ***/
+
+struct abuff
+{
+    char* b;
+    int len;
+};
+
+#define APBUFF_INIT {NULL, 0}
+
+void ab_append(struct abuff* ab, const char* s, int len)
+{
+    char* new = realloc(ab->b, ab->len + len);
+
+    if (new == NULL) return;
+    memcpy(&new[ab->len], s, len);
+    ab->b = new;
+    ab->len += len;
+}
+
+void ab_free(struct abuff* ab)
+{
+    free(ab->b);
+}
+
 /*** output ***/
 
-void editor_draw_rows()
+void editor_draw_rows(struct abuff* ab)
 {
 	for (int i = 0; i < E.screenrows; ++i)
 	{
-		write(STDOUT_FILENO, "~", 1);
-		if (i < E.screenrows-1)
-			write(STDOUT_FILENO, "\r\n", 2);
+	    if (i == E.screenrows / 3)
+	    {
+		char welcome[80];
+		int welcome_len = snprintf(welcome, sizeof(welcome),
+			"MAYORA text editor -- version %s", MAYEDIT_VERSION);
+		if (welcome_len > E.screencols) welcome_len = E.screencols;
+		int padding = (E.screencols - welcome_len) / 2;
+		if (padding)
+		{
+		    ab_append(ab, "~", 1);
+		    padding--;
+		}
+		while (padding--) ab_append(ab, " ", 1);
+		ab_append(ab, welcome, welcome_len);
+	    }
+	    else
+	    {
+		ab_append(ab, "~", 1);
+	    }
+	    ab_append(ab, "\x1b[K", 3);    // clears part of the line (right)
+	    if (i < E.screenrows-1)
+		ab_append(ab, "\r\n", 2);
 	}
 }
 
 void editor_refresh_screen()
 {
-	write(STDOUT_FILENO, "\x1b[2J", 4);		// clears screen
-	write(STDOUT_FILENO, "\x1b[H", 3);		// position the cursor at top-left corner
-	editor_draw_rows();
-	write(STDOUT_FILENO, "\x1b[H", 3);
+    struct abuff ab = APBUFF_INIT;
+
+    ab_append(&ab, "\x1b[?25l", 6);	// Hides the cursor on refreshing
+    //ab_append(&ab, "\x1b[2J", 4);	// clears screen (Don't use)
+    ab_append(&ab, "\x1b[H", 3);        // position the cursor at top-left corner
+
+    editor_draw_rows(&ab);
+
+    ab_append(&ab, "\x1b[H", 3);
+    ab_append(&ab, "\x1b[?25h", 6);
+    write(STDOUT_FILENO, ab.b, ab.len);
+    ab_free(&ab);
 }
 
 /*** input ***/
