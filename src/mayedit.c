@@ -1,11 +1,16 @@
 #define MAYEDIT_VERSION "0.0.1"
 
+#define _DEFAULT_SOURCE
+#define _GNU_SOURCE
+#define _BSD_SOURCE
+
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <errno.h>
 #include <string.h>
 
@@ -26,11 +31,23 @@ enum ED_KEYS {
     DEL_KEY
 };
 
+typedef struct {
+    int size;
+    char* chars;
+} erow;
+
 struct editor_config
 {
     int cx, cy;	    // Cursor position
+
+    // row and col offset from screen
+    int rowoff;
+    int coloff;
+
     int screenrows;
     int screencols;
+    int numrows;
+    erow* row;
     struct termios orig_termios;
 };
 
@@ -168,6 +185,40 @@ int get_window_size(int* rows, int* cols)
 	}
 }
 
+/*** row operations ***/
+
+void editor_append_row(char* s, size_t len)
+{
+    E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+
+    int at = E.numrows;
+    E.row[at].size = len;
+    E.row[at].chars = malloc(len + 1);
+    memcpy(E.row[at].chars, s, len);
+    E.row[at].chars[len] = '\0';
+    E.numrows++;
+}
+
+/*** file i/o ***/
+
+void editor_open(char* filename)
+{
+    FILE* fp = fopen(filename, "r");
+    if (!fp) die("Error on fopen");
+    
+    char* line = NULL;
+    size_t line_cap = 0;
+    ssize_t line_len;
+    while ((line_len=getline(&line, &line_cap, fp)) != -1) {	// Allocates in line
+        // Strip new line or carriage chars from the line before copying it
+        while (line_len > 0 && (line[line_len-1] == '\n' || line[line_len-1] == '\r'))
+            line_len--;
+        editor_append_row(line, line_len);
+    }
+    free(line);
+    fclose(fp);
+}
+
 /*** append buffer ***/
 
 struct abuff
@@ -195,27 +246,52 @@ void ab_free(struct abuff* ab)
 
 /*** output ***/
 
+void editor_scroll()
+{
+    if (E.cx < E.coloff) {
+	E.coloff = E.cx;
+    }
+    if (E.cy < E.rowoff) {
+	E.rowoff = E.cy;
+    }
+
+    if (E.cx >= E.screencols + E.coloff) {
+	E.coloff = E.cx - E.screencols + 1;
+    }
+    if (E.cy >= E.screenrows + E.rowoff) {
+	E.rowoff = E.cy - E.screenrows + 1;
+    }
+}
+
 void editor_draw_rows(struct abuff* ab)
 {
 	for (int i = 0; i < E.screenrows; ++i)
 	{
-	    if (i == E.screenrows / 3)
-	    {
-		char welcome[80];
-		int welcome_len = snprintf(welcome, sizeof(welcome),
-			"MAYORA text editor -- version %s", MAYEDIT_VERSION);
-		if (welcome_len > E.screencols) welcome_len = E.screencols;
-		int padding = (E.screencols - welcome_len) / 2;
-		if (padding)
-		{
-		    ab_append(ab, "~", 1);
-		    padding--;
-		}
-		while (padding--) ab_append(ab, " ", 1);
-		ab_append(ab, welcome, welcome_len);
-	    } else
-	    {
-		ab_append(ab, "~", 1);
+	    int filerow = i + E.rowoff;
+	    if (filerow >= E.numrows) {
+		if (E.numrows == 0 && i == E.screenrows / 3)
+	    	{
+	    	    char welcome[80];
+	    	    int welcome_len = snprintf(welcome, sizeof(welcome),
+	    	    	"MAYORA text editor -- version %s", MAYEDIT_VERSION);
+	    	    if (welcome_len > E.screencols) welcome_len = E.screencols;
+	    	    int padding = (E.screencols - welcome_len) / 2;
+	    	    if (padding)
+	    	    {
+	    	        ab_append(ab, "~", 1);
+	    	        padding--;
+	    	    }
+	    	    while (padding--) ab_append(ab, " ", 1);
+	    	    ab_append(ab, welcome, welcome_len);
+	    	} else
+	    	{
+	    	    ab_append(ab, "~", 1);
+	    	}
+	    } else {
+		int len = E.row[filerow].size - E.coloff;
+		if (len < 0) len = 0;
+		if (len > E.screencols) len = E.screencols;
+		ab_append(ab, &E.row[filerow].chars[E.coloff], len);
 	    }
 	    ab_append(ab, "\x1b[K", 3);    // clears part of the line (right)
 	    if (i < E.screenrows-1)
@@ -225,6 +301,7 @@ void editor_draw_rows(struct abuff* ab)
 
 void editor_refresh_screen()
 {
+    editor_scroll();
     struct abuff ab = APBUFF_INIT;
 
     ab_append(&ab, "\x1b[?25l", 6);	// Hides the cursor on refreshing
@@ -233,9 +310,9 @@ void editor_refresh_screen()
 
     editor_draw_rows(&ab);
 
-    // Move the cursor
+    // Position the cursor
     char buff[32];
-    snprintf(buff, sizeof(buff), "\x1b[%d;%dH", E.cy+1, E.cx+1);
+    snprintf(buff, sizeof(buff), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1, (E.cx - E.coloff) + 1);
     ab_append(&ab, buff, strlen(buff));
 
     ab_append(&ab, "\x1b[?25h", 6);
@@ -258,12 +335,11 @@ void editor_move_cursor(int key) {
 		E.cx--;
 	    break;
 	case ARROW_DOWN:
-	    if (E.cy < E.screenrows - 1)
+	    if (E.cy < E.numrows)
 		E.cy++;
 	    break;
 	case ARROW_RIGHT:
-	    if (E.cx < E.screencols - 1)
-		E.cx++;
+	    E.cx++;
 	    break;
 	case HOME_KEY:
 	    E.cx = 0;
@@ -313,18 +389,26 @@ void init_editor()
 {
     E.cx = 0;
     E.cy = 0;
+    E.numrows = 0;
+    E.row = NULL;
+    E.rowoff = 0;
+    E.coloff= 0;
     if (get_window_size(&E.screenrows, &E.screencols) == -1) die("Error on get_window_size");
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
-	enable_raw_mode();
-	init_editor();
-	while (1)
-	{
-		editor_refresh_screen();
-		editor_process_key_pressed();
-	}
-
-	return 0;
+    enable_raw_mode();
+    init_editor();
+    if (argc >= 2) {
+	char* filename = argv[1];
+	editor_open(filename);
+    }
+    while (1)
+    {
+        editor_refresh_screen();
+        editor_process_key_pressed();
+    }
+    
+    return 0;
 }
